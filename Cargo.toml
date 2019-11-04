@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 tungstenite = "0.9.1"
-log = "0.4.0"
+colored = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 url = "2.0"

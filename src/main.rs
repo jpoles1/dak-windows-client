@@ -1,13 +1,13 @@
-#[macro_use]
-extern crate log;
+use colored::*;
 
 extern crate tungstenite;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use url::Url;
-use tungstenite::{connect, Message};
+use tungstenite::{connect};
 use serde::{Serialize, Deserialize};
+use std::time::{Duration, Instant};
 
 // Structure of data expected in config.json
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -25,18 +25,20 @@ fn load_config(filename: &str) -> ClientConfig {
 }
 
 fn sleep_windows() {
-    Command::new("cmd")
+    /*Command::new("cmd")
     .args(&["/C", "shutdown", "/h"])
     .output()
-    .expect("Failed to execute shutdown process!");
+    .expect("Failed to execute shutdown process!");*/
+    println!("Sleepy time");
 }
 
 fn main () {
     // Load in config
     let client_config = load_config("config.json");
     loop {
+        let mut last_ping = Instant::now();
         // Connect to the url and call the closure
-        let url = client_config.ws_url + "?room=" + &client_config.room[..] + "&key=" + &client_config.key[..];
+        let url = client_config.ws_url.clone() + "?room=" + &client_config.room[..] + "&key=" + &client_config.key[..];
         let (mut socket, response) = connect(Url::parse(&url[..]).unwrap()).expect("Can't connect to websocket server");
 
         println!("Connected to the server");
@@ -56,8 +58,18 @@ fn main () {
                         sleep_windows();
                     }
                 }
+            } else if msg.is_ping() {
+                println!("Got ping!");
+                last_ping = Instant::now();
+            } else if msg.is_close() {
+                println!("{}", "Got close message from server!".red());
+            }
+            if last_ping.elapsed() > Duration::from_secs(30) {
+                println!("{}", "Timed out after 30 seconds without ping!".yellow());
+                break;
             }
         }
+        println!("{}", "Disconnected from socket!".yellow());
     }
     // socket.close(None);
 }
