@@ -38,7 +38,7 @@ fn load_config(filename: &str) -> ClientConfig {
 
 fn sleep_windows() {
 	println!("{}", "Sleepy time".yellow());
-    Command::new("cmd")
+    Command::new("cmd.exe")
     .args(&["/C", "shutdown", "/h"])
     .output()
     .expect("Failed to execute shutdown process!");
