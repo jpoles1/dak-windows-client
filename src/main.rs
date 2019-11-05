@@ -1,13 +1,25 @@
-use colored::*;
+extern crate futures;
+extern crate tokio;
+extern crate websocket;
 
-extern crate tungstenite;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use url::Url;
-use tungstenite::{connect};
+use std::time::{Instant, Duration};
+use std::sync::{Arc, Mutex};
+
+use colored::*;
+
+use futures::future::Future;
+use futures::sink::Sink;
+use futures::stream::Stream;
+use futures::sync::mpsc;
+use std::thread;
+use websocket::result::WebSocketError;
+use websocket::{ClientBuilder, OwnedMessage};
 use serde::{Serialize, Deserialize};
-use std::time::{Duration, Instant};
+
+type Timeout = Arc<Mutex<Instant>>;
 
 // Structure of data expected in config.json
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -20,56 +32,96 @@ struct ClientConfig {
 // Load in config settings from config.json in project root
 fn load_config(filename: &str) -> ClientConfig {
     let config_json = fs::read_to_string(Path::new(filename)).expect("Error reading config file!");
-    let server_config: ClientConfig = serde_json::from_str(&config_json[..]).unwrap();
+    let server_config: ClientConfig = serde_json::from_str(&config_json[..]).expect("Error parsing config file!");
     return server_config;
 }
 
 fn sleep_windows() {
-    /*Command::new("cmd")
+	println!("{}", "Sleepy time".yellow());
+    Command::new("cmd")
     .args(&["/C", "shutdown", "/h"])
     .output()
-    .expect("Failed to execute shutdown process!");*/
-    println!("Sleepy time");
+    .expect("Failed to execute shutdown process!");
 }
 
-fn main () {
-    // Load in config
-    let client_config = load_config("config.json");
-    loop {
-        let mut last_ping = Instant::now();
-        // Connect to the url and call the closure
-        let url = client_config.ws_url.clone() + "?room=" + &client_config.room[..] + "&key=" + &client_config.key[..];
-        let (mut socket, response) = connect(Url::parse(&url[..]).unwrap()).expect("Can't connect to websocket server");
+fn reset_ping_timeout(ta: Timeout) {
+    let mut t = ta.lock().unwrap();
+    *t = Instant::now();
+}
 
-        println!("Connected to the server");
-        println!("Response HTTP code: {}", response.code);
-        println!("Response contains the following headers:");
-        for &(ref header, _ /*value*/) in response.headers.iter() {
-            println!("* {}", header);
-        }
+fn check_ping_timeout(ta: Timeout) -> bool {
+    let t = ta.lock().unwrap();
+    return t.elapsed() > Duration::from_secs(15);
+}
 
-        loop {
-            let msg = socket.read_message().expect("Error reading message");
-            if msg.is_text() {
-                let msg_txt = msg.into_text().unwrap();
-                let command: Vec<&str> = msg_txt.split(":").collect();
-                if command.len() == 4 && command[0] == "alexaevent" && command[1] == "computer" {
-                    if command[2] == "power" && command[3] == "off" {
-                        sleep_windows();
-                    }
-                }
-            } else if msg.is_ping() {
-                println!("Got ping!");
-                last_ping = Instant::now();
-            } else if msg.is_close() {
-                println!("{}", "Got close message from server!".red());
-            }
-            if last_ping.elapsed() > Duration::from_secs(30) {
-                println!("{}", "Timed out after 30 seconds without ping!".yellow());
-                break;
-            }
+fn handle_msg(msg: String, ta: Timeout) -> String {
+    let out = msg.clone().to_owned();
+    let command: Vec<&str> = out.split(":").collect();
+    if command.len() == 4 && command[0] == "alexaevent" && command[1] == "computer" {
+        if command[2] == "power" && command[3] == "off" {
+            sleep_windows();
         }
-        println!("{}", "Disconnected from socket!".yellow());
     }
-    // socket.close(None);
+    reset_ping_timeout(ta);
+    return msg;
+}
+
+fn ws_client() {
+	// Load in config
+    let client_config = load_config("config.json");
+    let url = client_config.ws_url.clone() + "?room=" + &client_config.room[..] + "&key=" + &client_config.key[..];
+
+	let mut runtime = tokio::runtime::current_thread::Builder::new()
+		.build()
+		.unwrap();
+
+
+    let timeout: Timeout = Arc::new(Mutex::new(Instant::now()));
+	let ping_check_timeout: Timeout = timeout.clone();
+	
+	// Communication channel to allow websocket listener to close when signaled by timeout watcher in separate thread
+	let (timeout_sender, timeout_receiver) = mpsc::channel(0);
+
+	let runner = ClientBuilder::new(&url.to_owned())
+		.unwrap()
+		//.add_protocol("rust-websocket")
+		.async_connect_insecure()
+		.and_then(|(duplex, _)| {
+			println!("{}", "Connected to DAK server!".green());
+			// Spawn ping timeout listener
+			thread::spawn(move || {
+				loop {
+					if check_ping_timeout(ping_check_timeout.clone()) {
+						let mut sink = timeout_sender.wait();
+						sink.send(OwnedMessage::Close(None)).expect("Sending close msg to websocket client!");
+						break;
+					}
+					thread::sleep(Duration::from_secs(30));
+				}
+			});
+			let (sink, stream) = duplex.split();
+			stream
+				.filter_map(|message| {
+					match message {
+                        OwnedMessage::Text(msg) => {
+							if msg != "ping" { println!("Received Message: {:?}", msg) };
+                            Some(OwnedMessage::Text(handle_msg(msg, timeout.clone())))
+                        },
+						OwnedMessage::Close(e) => Some(OwnedMessage::Close(e)),
+						OwnedMessage::Ping(d) => Some(OwnedMessage::Pong(d)),
+						_ => None,
+					}
+				})
+				.select(timeout_receiver.map_err(|_| WebSocketError::NoDataAvailable))
+				.forward(sink)
+		});
+	let _runtime_result = runtime.block_on(runner);
+}
+
+fn main() {
+	loop {
+		ws_client();
+		println!("{}", "Disconnected from DAK server!".red());
+		thread::sleep(Duration::from_secs(15));
+	}
 }
