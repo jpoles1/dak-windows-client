@@ -36,6 +36,21 @@ fn load_config(filename: &str) -> ClientConfig {
     return server_config;
 }
 
+fn start_pangobright() {
+	println!("{}", "Starting pangobright.exe: Doom and gloom!".yellow());
+    Command::new("cmd.exe")
+    .args(&["/C", "pangobright.exe"])
+    .spawn()
+    .expect("Failed to kill pangobright!");
+}
+fn kill_pangobright() {
+	println!("{}", "Killing pangobright.exe: Bright eyes and bushy tails!".yellow());
+    Command::new("cmd.exe")
+    .args(&["/C", "taskkill", "/IM", "pangobright.exe", "/F"])
+    .output()
+    .expect("Failed to kill pangobright!");
+}
+
 fn sleep_windows() {
 	println!("{}", "Sleepy time".yellow());
     Command::new("cmd.exe")
@@ -60,7 +75,13 @@ fn handle_msg(msg: String, ta: Timeout) -> String {
     if command.len() == 4 && command[0] == "alexaevent" && command[1] == "computer" {
         if command[2] == "power" && command[3] == "off" {
             sleep_windows();
-        }
+		}
+		if command[2] == "color" && command[3] == "dim" {
+            start_pangobright();
+		}
+		if command[2] == "color" && command[3] == "bright" {
+            kill_pangobright();
+		}
     }
     reset_ping_timeout(ta);
     return msg;
