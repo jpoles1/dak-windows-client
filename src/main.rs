@@ -39,7 +39,7 @@ fn load_config(filename: &str) -> ClientConfig {
 fn start_pangobright() {
 	println!("{}", "Starting pangobright.exe: Doom and gloom!".yellow());
     Command::new("cmd.exe")
-    .args(&["/C", "pangobright.exe"])
+    .args(&["/C", ".\\dak-util\\pangobright.exe"])
     .spawn()
     .expect("Failed to kill pangobright!");
 }
@@ -47,7 +47,7 @@ fn kill_pangobright() {
 	println!("{}", "Killing pangobright.exe: Bright eyes and bushy tails!".yellow());
     Command::new("cmd.exe")
     .args(&["/C", "taskkill", "/IM", "pangobright.exe", "/F"])
-    .output()
+    .spawn()
     .expect("Failed to kill pangobright!");
 }
 
@@ -55,7 +55,7 @@ fn sleep_windows() {
 	println!("{}", "Sleepy time".yellow());
     Command::new("cmd.exe")
     .args(&["/C", "shutdown", "/h"])
-    .output()
+    .spawn()
     .expect("Failed to execute shutdown process!");
 }
 
@@ -89,7 +89,7 @@ fn handle_msg(msg: String, ta: Timeout) -> String {
 
 fn ws_client() {
 	// Load in config
-    let client_config = load_config("config.json");
+    let client_config = load_config("dak-util/config.json");
     let url = client_config.ws_url.clone() + "?room=" + &client_config.room[..] + "&key=" + &client_config.key[..];
 
 	let mut runtime = tokio::runtime::current_thread::Builder::new()
